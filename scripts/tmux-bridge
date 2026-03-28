@@ -117,6 +117,7 @@ Usage: tmux-bridge <command> [args...]
 Commands:
   list                      Show all panes (target, pid, command, size, label)
   type <target> <text>      Type text without pressing Enter
+  message <target> <text>   Type text with auto-prepended sender info and reply target
   read <target> [lines]     Read last N lines from pane (default: 50)
   keys <target> <key>...    Send special keys (Enter, Escape, C-c, etc.)
   name <target> <label>     Label a pane (visible in tmux border)
@@ -223,6 +224,30 @@ cmd_type() {
   require_read "$target"
 
   tmx send-keys -t "$target" -l -- "$2"
+  clear_read "$target"
+}
+
+cmd_message() {
+  require_args 2 $# "message"
+  require_tmux
+  local target
+  target=$(resolve_target "$1")
+  validate_target "$target"
+  require_read "$target"
+
+  # Detect sender identity and location
+  local sender_pane="${TMUX_PANE:-}"
+  if [[ -z "$sender_pane" ]]; then
+    die "not running inside a tmux pane (\$TMUX_PANE is unset)"
+  fi
+  local sender_label
+  sender_label=$(tmx display-message -t "$sender_pane" -p '#{@name}' 2>/dev/null || true)
+  local from="${sender_label:-$sender_pane}"
+  local session_win
+  session_win=$(tmx display-message -t "$sender_pane" -p '#{session_name}:#{window_index}.#{pane_index}' 2>/dev/null || true)
+
+  local header="[tmux-bridge from:${from} pane:${sender_pane} at:${session_win}]"
+  tmx send-keys -t "$target" -l -- "${header} $2"
   clear_read "$target"
 }
 
@@ -368,6 +393,7 @@ init_socket
 case "$1" in
   list)    shift; cmd_list "$@" ;;
   type)    shift; cmd_type "$@" ;;
+  message|msg) shift; cmd_message "$@" ;;
   read)    shift; cmd_read "$@" ;;
   keys)    shift; cmd_keys "$@" ;;
   name)    shift; cmd_name "$@" ;;

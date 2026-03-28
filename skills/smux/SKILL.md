@@ -41,6 +41,7 @@ error: must read the pane before interacting. Run: tmux-bridge read codex
 |---|---|---|
 | `tmux-bridge list` | Show all panes with target, pid, command, size, label | `tmux-bridge list` |
 | `tmux-bridge type <target> <text>` | Type text without pressing Enter | `tmux-bridge type codex "hello"` |
+| `tmux-bridge message <target> <text>` | Type text with auto sender info and reply target | `tmux-bridge message codex "review src/auth.ts"` |
 | `tmux-bridge read <target> [lines]` | Read last N lines (default 50) | `tmux-bridge read codex 100` |
 | `tmux-bridge keys <target> <key>...` | Send special keys | `tmux-bridge keys codex Enter` |
 | `tmux-bridge name <target> <label>` | Label a pane (visible in tmux border) | `tmux-bridge name %3 codex` |
@@ -60,8 +61,8 @@ Every interaction follows **read → act → read**. The CLI enforces this.
 **Sending a message to an agent:**
 ```bash
 tmux-bridge read codex 20                    # 1. READ — satisfy read guard
-tmux-bridge type codex '[tmux-bridge from:claude] Please review src/auth.ts'
-                                              # 2. TYPE — no Enter yet
+tmux-bridge message codex 'Please review src/auth.ts'
+                                              # 2. MESSAGE — auto-prepends sender info, no Enter
 tmux-bridge read codex 20                    # 3. READ — verify text landed
 tmux-bridge keys codex Enter                 # 4. KEYS — submit
 # STOP. Do NOT read codex for a reply. The agent replies into YOUR pane.
@@ -78,13 +79,13 @@ tmux-bridge read worker 20                   # 5. READ — see the result
 
 ### Messaging Convention
 
-Frame messages with the sender's name so the receiver knows who sent it and how to reply:
+The `message` command auto-prepends sender info and location:
 
 ```
-[tmux-bridge from:claude] Please review src/auth.ts
+[tmux-bridge from:claude pane:%4 at:3:0.0] Please review src/auth.ts
 ```
 
-When you see a `[tmux-bridge from:<sender>]` message, reply using tmux-bridge back to the sender's pane. Do not just respond in your own pane.
+The receiver gets: who sent it (`from`), the exact pane to reply to (`pane`), and the session/window location (`at`). When you see this header, reply using tmux-bridge to the pane ID from the header.
 
 ### Agent-to-Agent Workflow
 
@@ -97,7 +98,7 @@ tmux-bridge list
 
 # 3. Send a message (read-act-read)
 tmux-bridge read codex 20
-tmux-bridge type codex '[tmux-bridge from:claude] Please review the changes in src/auth.ts'
+tmux-bridge message codex 'Please review the changes in src/auth.ts'
 tmux-bridge read codex 20
 tmux-bridge keys codex Enter
 ```
@@ -107,22 +108,22 @@ tmux-bridge keys codex Enter
 **Agent A (claude) sends:**
 ```bash
 tmux-bridge read codex 20
-tmux-bridge type codex '[tmux-bridge from:claude] What is the test coverage for src/auth.ts?'
+tmux-bridge message codex 'What is the test coverage for src/auth.ts?'
 tmux-bridge read codex 20
 tmux-bridge keys codex Enter
 ```
 
 **Agent B (codex) sees in their prompt:**
 ```
-[tmux-bridge from:claude] What is the test coverage for src/auth.ts?
+[tmux-bridge from:claude pane:%4 at:3:0.0] What is the test coverage for src/auth.ts?
 ```
 
-**Agent B replies:**
+**Agent B replies using the pane ID from the header:**
 ```bash
-tmux-bridge read claude 20
-tmux-bridge type claude '[tmux-bridge from:codex] 87% line coverage. Missing the OAuth refresh token path (lines 142-168).'
-tmux-bridge read claude 20
-tmux-bridge keys claude Enter
+tmux-bridge read %4 20
+tmux-bridge message %4 '87% line coverage. Missing the OAuth refresh token path (lines 142-168).'
+tmux-bridge read %4 20
+tmux-bridge keys %4 Enter
 ```
 
 ---
