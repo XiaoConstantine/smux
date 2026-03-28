@@ -2,6 +2,8 @@
 
 One-command tmux setup with sensible defaults and cross-pane communication.
 
+https://github.com/ShawnPana/tmux-config/releases/download/v0.0.0-assets/tmux-bridge.mp4
+
 ## Install
 
 ```bash
@@ -66,7 +68,7 @@ A CLI for cross-pane communication between AI agents. Any tool that can run bash
 | `tmux-bridge name <target> <label>` | Label a pane |
 | `tmux-bridge id` | Print this pane's ID |
 
-See the [tmux-bridge skill](skills/tmux-bridge/SKILL.md) for full documentation.
+See the [smux skill](skills/smux/SKILL.md) for full documentation.
 
 ## Update
 
@@ -90,5 +92,5 @@ npx skills add ShawnPana/smux
 
 ## Requirements
 
-- macOS or Linux
+- macOS (requires [Homebrew](https://brew.sh)) or Linux
 - tmux 3.2+ (installed automatically)
