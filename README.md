@@ -17,7 +17,7 @@ https://github.com/user-attachments/assets/9d5463ba-5972-4bbd-a07e-b585f1178011
 ## Install
 
 ```bash
-curl -fsSL shawnpana.com/smux/install.sh | bash
+curl -fsSL https://shawnpana.com/smux/install.sh | bash
 ```
 
 This installs:
