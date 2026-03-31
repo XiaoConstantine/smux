@@ -3,7 +3,7 @@
 # Any tool that can run bash can use this to talk to other panes.
 set -euo pipefail
 
-VERSION="2.1.0"
+VERSION="2.2.0"
 
 # --- Helpers ---
 
@@ -115,9 +115,11 @@ tmux-bridge — cross-pane communication for AI agents
 Usage: tmux-bridge <command> [args...]
 
 Commands:
-  list                      Show all panes (target, pid, command, size, label)
+  list [--json|--tsv]       Show all panes (target, pid, command, size, label)
   send <target> <text>      Type text and press Enter
   msgsend <target> <text>   Send a message with sender info and press Enter
+  batch-send <text> <t1> [t2...]  Send text to multiple targets in one invocation
+  batch-msgsend <text> <t1> [t2...]  Send message with header to multiple targets
   type <target> <text>      Type text without pressing Enter
   message <target> <text>   Type text with auto-prepended sender info and reply target
   read <target> [lines]     Read last N lines from pane (default: 50)
@@ -189,15 +191,45 @@ require_args() {
 
 cmd_list() {
   require_tmux
-  printf "%-8s %-16s %-10s %-25s %-10s %s\n" "TARGET" "SESSION:WIN" "SIZE" "PROCESS" "LABEL" "CWD"
-  tmx list-panes -a \
+  local fmt="${1:-table}"
+  local raw
+  raw=$(tmx list-panes -a \
     -F '#{pane_id}|#{session_name}:#{window_index}|#{pane_width}x#{pane_height}|#{pane_current_command}|#{?@name,#{@name},-}|#{pane_current_path}' \
-    2>/dev/null | awk -F'|' -v home="$HOME" '
-      {
-        gsub("^" home, "~", $6)
-        printf "%-8s %-16s %-10s %-25s %-10s %s\n", $1, $2, $3, $4, $5, $6
-      }
-    '
+    2>/dev/null)
+
+  case "$fmt" in
+    --json)
+      echo "$raw" | awk -F'|' -v home="$HOME" '
+        function jesc(s) { gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); return s }
+        BEGIN { printf "[" }
+        NR > 1 { printf "," }
+        {
+          gsub("^" home, "~", $6)
+          lbl = ($5 == "-" ? "" : $5)
+          printf "{\"target\":\"%s\",\"session_win\":\"%s\",\"size\":\"%s\",\"process\":\"%s\",\"label\":\"%s\",\"cwd\":\"%s\"}", jesc($1), jesc($2), jesc($3), jesc($4), jesc(lbl), jesc($6)
+        }
+        END { printf "]\n" }
+      '
+      ;;
+    --tsv)
+      printf "target\tsession_win\tsize\tprocess\tlabel\tcwd\n"
+      echo "$raw" | awk -F'|' -v home="$HOME" '
+        {
+          gsub("^" home, "~", $6)
+          printf "%s\t%s\t%s\t%s\t%s\t%s\n", $1, $2, $3, $4, ($5 == "-" ? "" : $5), $6
+        }
+      '
+      ;;
+    table|*)
+      printf "%-8s %-16s %-10s %-25s %-10s %s\n" "TARGET" "SESSION:WIN" "SIZE" "PROCESS" "LABEL" "CWD"
+      echo "$raw" | awk -F'|' -v home="$HOME" '
+        {
+          gsub("^" home, "~", $6)
+          printf "%-8s %-16s %-10s %-25s %-10s %s\n", $1, $2, $3, $4, $5, $6
+        }
+      '
+      ;;
+  esac
 }
 
 build_message_header() {
@@ -273,6 +305,51 @@ cmd_msgsend() {
   tmx send-keys -t "$target" -l -- "${header} $text"
   tmx send-keys -t "$target" Enter
   clear_read "$target"
+}
+
+cmd_batch_send() {
+  require_args 2 $# "batch-send"
+  require_tmux
+  local text="$1"; shift
+  local failed=() resolved
+
+  for target in "$@"; do
+    resolved=$(resolve_target "$target") || { failed+=("$target"); continue; }
+    if tmx send-keys -t "$resolved" -l -- "$text" && \
+       tmx send-keys -t "$resolved" Enter; then
+      clear_read "$resolved"
+    else
+      failed+=("$target")
+    fi
+  done
+
+  if (( ${#failed[@]} > 0 )); then
+    echo "error: failed targets: ${failed[*]}" >&2
+    return 1
+  fi
+}
+
+cmd_batch_msgsend() {
+  require_args 2 $# "batch-msgsend"
+  require_tmux
+  local text="$1"; shift
+  local header failed=() resolved
+  header=$(build_message_header)
+
+  for target in "$@"; do
+    resolved=$(resolve_target "$target") || { failed+=("$target"); continue; }
+    if tmx send-keys -t "$resolved" -l -- "${header} $text" && \
+       tmx send-keys -t "$resolved" Enter; then
+      clear_read "$resolved"
+    else
+      failed+=("$target")
+    fi
+  done
+
+  if (( ${#failed[@]} > 0 )); then
+    echo "error: failed targets: ${failed[*]}" >&2
+    return 1
+  fi
 }
 
 cmd_read() {
@@ -417,6 +494,8 @@ case "$1" in
   list)    shift; cmd_list "$@" ;;
   send)    shift; cmd_send "$@" ;;
   msgsend|message-send) shift; cmd_msgsend "$@" ;;
+  batch-send) shift; cmd_batch_send "$@" ;;
+  batch-msgsend) shift; cmd_batch_msgsend "$@" ;;
   type)    shift; cmd_type "$@" ;;
   message|msg) shift; cmd_message "$@" ;;
   read)    shift; cmd_read "$@" ;;
