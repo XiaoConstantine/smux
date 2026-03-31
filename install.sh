@@ -2,8 +2,8 @@
 # smux — one-command tmux setup
 set -euo pipefail
 
-VERSION="1.0.0"
-REPO="ShawnPana/smux"
+VERSION="2.2.0"
+REPO="XiaoConstantine/smux"
 BRANCH="main"
 BASE_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH}"
 SMUX_DIR="$HOME/.smux"

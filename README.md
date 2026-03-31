@@ -7,17 +7,16 @@ One-command tmux setup with terminal automation for AI agents.
 - **Agent-to-agent** — Claude Code can prompt Codex in the next pane, and Codex replies back. Any agent that can run bash can participate.
 
 ```bash
-tmux-bridge read codex 20          # read the pane
-tmux-bridge type codex "review src/auth.ts"  # type into it
-tmux-bridge keys codex Enter       # press enter
+tmux-bridge msgsend codex "review src/auth.ts"  # send message with header + Enter
+tmux-bridge send worker "y"                      # type + Enter in one command
+tmux-bridge list --json                          # machine-readable pane list
+tmux-bridge batch-msgsend "start task" codex cc amp  # fan-out to multiple agents
 ```
-
-https://github.com/user-attachments/assets/9d5463ba-5972-4bbd-a07e-b585f1178011
 
 ## Install
 
 ```bash
-curl -fsSL https://shawnpana.com/smux/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/XiaoConstantine/smux/main/install.sh | bash
 ```
 
 This installs:
@@ -69,15 +68,47 @@ All keybindings use **Option (Alt)** with no prefix required.
 
 A CLI for cross-pane communication. Any tool that can run bash can use it — Claude Code, Codex, Gemini CLI, or a plain shell script.
 
+### Commands
+
 | Command | Description |
 |---|---|
-| `tmux-bridge list` | Show all panes with target, process, label |
+| `tmux-bridge list [--json\|--tsv]` | Show all panes (table, JSON, or TSV) |
+| `tmux-bridge send <target> <text>` | Type text and press Enter |
+| `tmux-bridge msgsend <target> <text>` | Send message with sender info and press Enter |
+| `tmux-bridge batch-send <text> <t1> [t2...]` | Send text to multiple targets |
+| `tmux-bridge batch-msgsend <text> <t1> [t2...]` | Send message to multiple targets |
+| `tmux-bridge type <target> <text>` | Type text (no Enter) |
+| `tmux-bridge message <target> <text>` | Type with sender info (no Enter) |
 | `tmux-bridge read <target> [lines]` | Read last N lines from a pane |
-| `tmux-bridge type <target> <text>` | Type text into a pane (no Enter) |
 | `tmux-bridge keys <target> <key>...` | Send keys (Enter, Escape, C-c, etc.) |
 | `tmux-bridge name <target> <label>` | Label a pane for easy addressing |
 | `tmux-bridge resolve <label>` | Look up a pane by label |
 | `tmux-bridge id` | Print this pane's ID |
+
+### Environment Variables
+
+| Variable | Description |
+|---|---|
+| `TMUX_BRIDGE_SOCKET` | Override tmux server socket path (skips auto-detection) |
+| `TMUX_BRIDGE_HEADER_CACHE` | Pre-built message header (skips 2 tmux display-message calls) |
+
+### Performance Tips
+
+For high-frequency callers (e.g., orchestrators running many bridge calls):
+
+```bash
+# Skip socket auto-detection on every call
+export TMUX_BRIDGE_SOCKET="${TMUX%%,*}"
+
+# Cache the message header to avoid 2 tmux calls per msgsend
+export TMUX_BRIDGE_HEADER_CACHE="$(tmux-bridge msgsend --dry-run 2>/dev/null || true)"
+
+# Use pane IDs (%N) directly instead of labels to skip resolve
+tmux-bridge msgsend %5 "hello"    # faster than: tmux-bridge msgsend codex "hello"
+
+# Fan-out to multiple agents in one process
+tmux-bridge batch-msgsend "start task" codex cc amp
+```
 
 See the [smux skill](skills/smux/SKILL.md) for full documentation on agent-to-agent workflows.
 
@@ -98,7 +129,7 @@ smux uninstall
 Install the smux skill to teach your agents how to use tmux-bridge:
 
 ```bash
-npx skills add ShawnPana/smux
+npx skills add XiaoConstantine/smux
 ```
 
 Works with Claude Code, Codex, Cursor, Copilot, and [40+ other agents](https://skills.sh).

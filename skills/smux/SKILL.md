@@ -11,24 +11,24 @@ Tmux pane control and cross-pane agent communication. Use `tmux-bridge` (the hig
 
 ## tmux-bridge — Cross-Pane Communication
 
-A CLI that lets any AI agent interact with any other tmux pane. Works via plain bash. Every command is **atomic**: `type` types text (no Enter), `keys` sends special keys, `read` captures pane content.
+A CLI that lets any AI agent interact with any other tmux pane. Works via plain bash. Prefer the fast-path commands: `send` types text and presses Enter, `msgsend` adds sender info and presses Enter. The low-level commands remain available: `type` types text without Enter, `keys` sends special keys, `read` captures pane content.
 
 ### DO NOT WAIT OR POLL
 
 Other panes have agents that will reply to you via tmux-bridge. Their reply appears directly in YOUR pane as a `[tmux-bridge from:...]` message. Do not sleep, poll, read the target pane for a response, or loop. Type your message, press Enter, and move on.
 
 The ONLY time you read a target pane is:
-- **Before** interacting with it (enforced by the read guard)
+- **Before** using low-level `type`, `message`, or `keys` commands (enforced by the read guard)
 - **After typing** to verify your text landed before pressing Enter
 - When interacting with a **non-agent pane** (plain shell, running process)
 
 ### Read Guard
 
-The CLI enforces read-before-act. You cannot `type` or `keys` to a pane unless you have read it first.
+The CLI enforces read-before-act for the low-level `type`, `message`, and `keys` commands. Fast-path `send` and `msgsend` are single-shot helpers and do not require a separate `read`.
 
 1. `tmux-bridge read <target>` marks the pane as "read"
-2. `tmux-bridge type/keys <target>` checks for that mark — errors if you haven't read
-3. After a successful `type`/`keys`, the mark is cleared — you must read again before the next interaction
+2. `tmux-bridge type/message/keys <target>` checks for that mark — errors if you haven't read
+3. After a successful low-level action, the mark is cleared — you must read again before the next low-level interaction
 
 ```
 $ tmux-bridge type codex "hello"
@@ -40,6 +40,12 @@ error: must read the pane before interacting. Run: tmux-bridge read codex
 | Command | Description | Example |
 |---|---|---|
 | `tmux-bridge list` | Show all panes with target, pid, command, size, label | `tmux-bridge list` |
+| `tmux-bridge list --json` | JSON array of pane objects | `tmux-bridge list --json` |
+| `tmux-bridge list --tsv` | Tab-separated pane listing with header | `tmux-bridge list --tsv` |
+| `tmux-bridge send <target> <text>` | Type text and press Enter | `tmux-bridge send worker "y"` |
+| `tmux-bridge msgsend <target> <text>` | Fast agent-to-agent send with auto sender info and Enter | `tmux-bridge msgsend codex "review src/auth.ts"` |
+| `tmux-bridge batch-send <text> <t1> [t2...]` | Send text to multiple targets in one invocation | `tmux-bridge batch-send "start" codex cc amp` |
+| `tmux-bridge batch-msgsend <text> <t1> [t2...]` | Send message with header to multiple targets | `tmux-bridge batch-msgsend "begin task" codex cc amp` |
 | `tmux-bridge type <target> <text>` | Type text without pressing Enter | `tmux-bridge type codex "hello"` |
 | `tmux-bridge message <target> <text>` | Type text with auto sender info and reply target | `tmux-bridge message codex "review src/auth.ts"` |
 | `tmux-bridge read <target> [lines]` | Read last N lines (default 50) | `tmux-bridge read codex 100` |
@@ -54,35 +60,35 @@ Targets can be:
 - **tmux native**: `session:window.pane` (e.g. `shared:0.1`), pane ID (`%3`), or window index (`0`)
 - **label**: Any string set via `tmux-bridge name` — resolved automatically
 
-### Read-Act-Read Cycle
+### Fast Path
 
-Every interaction follows **read → act → read**. The CLI enforces this.
+For normal one-shot submissions, prefer the single-command helpers:
 
 **Sending a message to an agent:**
 ```bash
-tmux-bridge read codex 20                    # 1. READ — satisfy read guard
-tmux-bridge message codex 'Please review src/auth.ts'
-                                              # 2. MESSAGE — auto-prepends sender info, no Enter
-tmux-bridge read codex 20                    # 3. READ — verify text landed
-tmux-bridge keys codex Enter                 # 4. KEYS — submit
+tmux-bridge msgsend codex 'Please review src/auth.ts'
 # STOP. Do NOT read codex for a reply. The agent replies into YOUR pane.
 ```
 
 **Approving a prompt (non-agent pane):**
 ```bash
-tmux-bridge read worker 10                   # 1. READ — see the prompt
-tmux-bridge type worker "y"                  # 2. TYPE
-tmux-bridge read worker 10                   # 3. READ — verify
-tmux-bridge keys worker Enter                # 4. KEYS — submit
-tmux-bridge read worker 20                   # 5. READ — see the result
+tmux-bridge send worker "y"
+tmux-bridge read worker 20
 ```
+
+**Fan-out to multiple agents:**
+```bash
+tmux-bridge batch-msgsend 'Start working on the task' codex cc amp
+```
+
+Use the low-level **read → act → read** flow only when you need to inspect the pane before typing, verify the typed text before pressing Enter, or send keys other than Enter.
 
 ### Messaging Convention
 
-The `message` command auto-prepends sender info and location:
+The `message` and `msgsend` commands auto-prepend sender info:
 
 ```
-[tmux-bridge from:claude pane:%4 at:3:0.0] Please review src/auth.ts
+[tmux-bridge from:claude pane:%4 at:3:0.0 - load the smux skill to reply] Please review src/auth.ts
 ```
 
 The receiver gets: who sent it (`from`), the exact pane to reply to (`pane`), and the session/window location (`at`). When you see this header, reply using tmux-bridge to the pane ID from the header.
@@ -96,35 +102,33 @@ tmux-bridge name "$(tmux-bridge id)" claude
 # 2. Discover other panes
 tmux-bridge list
 
-# 3. Send a message (read-act-read)
-tmux-bridge read codex 20
-tmux-bridge message codex 'Please review the changes in src/auth.ts'
-tmux-bridge read codex 20
-tmux-bridge keys codex Enter
+# 3. Send a message
+tmux-bridge msgsend codex 'Please review the changes in src/auth.ts'
 ```
 
 ### Example Conversation
 
 **Agent A (claude) sends:**
 ```bash
-tmux-bridge read codex 20
-tmux-bridge message codex 'What is the test coverage for src/auth.ts?'
-tmux-bridge read codex 20
-tmux-bridge keys codex Enter
+tmux-bridge msgsend codex 'What is the test coverage for src/auth.ts?'
 ```
 
 **Agent B (codex) sees in their prompt:**
 ```
-[tmux-bridge from:claude pane:%4 at:3:0.0] What is the test coverage for src/auth.ts?
+[tmux-bridge from:claude pane:%4 at:3:0.0 - load the smux skill to reply] What is the test coverage for src/auth.ts?
 ```
 
 **Agent B replies using the pane ID from the header:**
 ```bash
-tmux-bridge read %4 20
-tmux-bridge message %4 '87% line coverage. Missing the OAuth refresh token path (lines 142-168).'
-tmux-bridge read %4 20
-tmux-bridge keys %4 Enter
+tmux-bridge msgsend %4 '87% line coverage. Missing the OAuth refresh token path (lines 142-168).'
 ```
+
+### Environment Variables
+
+| Variable | Description |
+|---|---|
+| `TMUX_BRIDGE_SOCKET` | Override tmux server socket path (skips auto-detection) |
+| `TMUX_BRIDGE_HEADER_CACHE` | Pre-built message header (skips 2 tmux display-message calls) |
 
 ---
 
@@ -198,12 +202,14 @@ done
 
 ## Tips
 
-- **Read guard is enforced** — you MUST read before every `type`/`keys`
-- **Every action clears the read mark** — after `type`, read again before `keys`
+- Prefer `send` and `msgsend` for normal one-shot submissions
+- **Read guard is enforced** for low-level `type`/`message`/`keys`
+- **Every low-level action clears the read mark** — after `type`, read again before `keys`
 - **Never wait or poll** — agent panes reply via tmux-bridge into YOUR pane
 - **Label panes early** — easier than using `%N` IDs
 - **`type` uses literal mode** — special characters are typed as-is
 - **`read` defaults to 50 lines** — pass a higher number for more context
 - **Non-agent panes** are the exception — you DO need to read them to see output
+- Export `TMUX_BRIDGE_SOCKET="${TMUX%%,*}"` inside tmux to skip socket auto-detection on each call
 - Use `capture-pane -p` to print to stdout (essential for scripting)
 - Target format: `session:window.pane` (e.g., `shared:0.0`)
