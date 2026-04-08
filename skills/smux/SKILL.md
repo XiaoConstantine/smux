@@ -60,6 +60,8 @@ Targets can be:
 - **tmux native**: `session:window.pane` (e.g. `shared:0.1`), pane ID (`%3`), or window index (`0`)
 - **label**: Any string set via `tmux-bridge name` — resolved automatically
 
+When you run `tmux-bridge` inside tmux, label lookup prefers panes in your current tmux session. If a label is ambiguous, use the pane ID (`%N`) or a fully qualified tmux target instead of relying on the label.
+
 ### Fast Path
 
 For normal one-shot submissions, prefer the single-command helpers:

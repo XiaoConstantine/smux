@@ -85,6 +85,8 @@ A CLI for cross-pane communication. Any tool that can run bash can use it — Cl
 | `tmux-bridge resolve <label>` | Look up a pane by label |
 | `tmux-bridge id` | Print this pane's ID |
 
+When `tmux-bridge` runs inside tmux, label resolution prefers panes in the current tmux session. If the same label exists in multiple candidate panes, it now fails instead of silently picking one.
+
 ### Environment Variables
 
 | Variable | Description |

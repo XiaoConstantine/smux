@@ -80,6 +80,8 @@ Targets can be:
 
 This means `tmux-bridge type codex "hello"` works directly if the pane was labeled `codex`.
 
+When run inside tmux, label lookup prefers panes in the current tmux session. If more than one pane matches, `tmux-bridge` errors instead of silently choosing one; use a pane ID (`%N`) or a fully qualified target when labels are duplicated.
+
 ## Messaging Convention
 
 The CLI is **format-agnostic** — it types exactly what you give it. The recommended convention for agent-to-agent messages is to frame them yourself:

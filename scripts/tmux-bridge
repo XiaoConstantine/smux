@@ -133,6 +133,8 @@ Commands:
 Target resolution:
   Targets can be tmux native (session:window.pane, %N) or a label set via 'name'.
   Labels are resolved automatically — e.g. 'tmux-bridge type codex "hello"' works.
+  When run inside tmux, label lookup prefers panes in the current session.
+  Ambiguous label matches fail and tell you which panes matched.
 
 Environment:
   TMUX_BRIDGE_SOCKET         Override the tmux server socket path (skips auto-detection)
@@ -169,15 +171,65 @@ resolve_target() {
   resolve_label "$target"
 }
 
+current_session_id() {
+  [[ -n "${TMUX_PANE:-}" ]] || return 0
+
+  if [[ -n "${TMUX:-}" && "${TMUX_SOCKET}" != "__default__" ]]; then
+    local env_socket="${TMUX%%,*}"
+    [[ "${env_socket}" == "${TMUX_SOCKET}" ]] || return 0
+  fi
+
+  tmx display-message -t "${TMUX_PANE}" -p '#{session_id}' 2>/dev/null || true
+}
+
+format_match_list() {
+  local matches=("$@")
+  local rendered=()
+  local match pane_id session_win
+
+  for match in "${matches[@]}"; do
+    pane_id="${match%%$'\t'*}"
+    session_win="${match#*$'\t'}"
+    rendered+=("${pane_id} (${session_win})")
+  done
+
+  local IFS=', '
+  printf '%s' "${rendered[*]}"
+}
+
 resolve_label() {
   local label="$1"
-  local result
-  result=$(tmx list-panes -a -F '#{pane_id} #{@name}' 2>/dev/null \
-    | awk -v lbl="$label" '$2 == lbl { print $1; exit }')
-  if [[ -z "$result" ]]; then
+  local session_id pane_id pane_session_id session_win pane_label
+  local matches=() session_matches=()
+
+  session_id=$(current_session_id)
+
+  while IFS=$'\t' read -r pane_id pane_session_id session_win pane_label; do
+    [[ "${pane_label}" == "${label}" ]] || continue
+    matches+=("${pane_id}"$'\t'"${session_win}")
+    if [[ -n "${session_id}" && "${pane_session_id}" == "${session_id}" ]]; then
+      session_matches+=("${pane_id}"$'\t'"${session_win}")
+    fi
+  done < <(tmx list-panes -a -F '#{pane_id}	#{session_id}	#{session_name}:#{window_index}.#{pane_index}	#{?@name,#{@name},}' 2>/dev/null)
+
+  if (( ${#session_matches[@]} == 1 )); then
+    echo "${session_matches[0]%%$'\t'*}"
+    return
+  fi
+
+  if (( ${#session_matches[@]} > 1 )); then
+    die "label '$label' is ambiguous in the current tmux session: $(format_match_list "${session_matches[@]}"). Use a pane ID (%N) or a fully qualified target."
+  fi
+
+  if (( ${#matches[@]} == 0 )); then
     die "no pane found with label '$label'"
   fi
-  echo "$result"
+
+  if (( ${#matches[@]} > 1 )); then
+    die "label '$label' matched multiple panes: $(format_match_list "${matches[@]}"). Re-run inside the desired tmux session or use a pane ID (%N) or fully qualified target."
+  fi
+
+  echo "${matches[0]%%$'\t'*}"
 }
 
 require_args() {
